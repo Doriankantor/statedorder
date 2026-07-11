@@ -1,0 +1,124 @@
+============================================================================
+THE STATED ORDER — SETUP GUIDE
+Kantor Consulting interactive strategy map
+Last updated: July 12, 2026
+============================================================================
+
+WHAT THIS IS
+------------
+An interactive world map that maps three things at once:
+  1. How the U.S. National Security Strategy plays out around the world
+  2. EU (and other European) engagement with Latin America
+  3. The LATAM security situation
+
+Readers click countries, open regional "baskets," or pick an external actor
+(US / Europe / China / Iran / Russia) to draw connection lines. The lines are
+generated from what your publications actually mention.
+
+
+THE FILES YOU NEED
+------------------
+Only TWO files matter for the live map:
+
+  1. The Stated Order.html      <- the map itself (open this in a browser)
+  2. scrape-portfolio.mjs       <- the scraper that feeds it real data
+
+A THIRD file gets created by the scraper:
+
+  3. publications.generated.js  <- produced when you run the scraper
+                                   (the map loads it automatically; the map
+                                    still works without it, using built-in
+                                    sample data)
+
+You can IGNORE these — they are the earlier 3-option design comparison and are
+not part of the final map:
+  - Regional Strategy Map.dc.html
+  - support.js
+
+
+============================================================================
+STEP-BY-STEP
+============================================================================
+
+STEP 1 — Put the files in your cowork project
+  Copy "The Stated Order.html" and "scrape-portfolio.mjs" into your cowork
+  project folder (same folder for both).
+
+STEP 2 — Check Node.js is available
+  Open a terminal in that folder and run:
+      node --version
+  You need version 18 or newer. If you see a version number >= 18, continue.
+  (Node is only needed to RUN the scraper. The HTML map itself needs no Node.)
+
+STEP 3 — Preview what the scraper finds (optional but recommended)
+  Run:
+      node scrape-portfolio.mjs --dry
+  This prints, for every article it finds, the title plus the countries and
+  actors it detected — WITHOUT writing any file. Skim the list to confirm it's
+  catching the right things. (See "TUNING" below if it misses or over-matches.)
+
+STEP 4 — Generate the data file
+  Run:
+      node scrape-portfolio.mjs
+  This writes "publications.generated.js" into the folder and prints a summary
+  (how many countries and publications it captured).
+
+STEP 5 — Open the map
+  Double-click "The Stated Order.html" (or open it in a browser).
+  It now shows your real, scraped publications. Click the "United States",
+  "Europe", "China", "Iran" or "Russia" buttons to see the connection lines.
+
+STEP 6 — Keep it current
+  Whenever you publish something new, re-run STEP 4. New lines appear on the
+  map automatically. Nothing else to change.
+
+
+============================================================================
+EMBEDDING IN SQUARESPACE
+============================================================================
+Option A (simplest): host the folder somewhere (any static host) and embed it
+  in a Squarespace page using an <iframe> pointing at The Stated Order.html.
+
+Option B: paste the contents of The Stated Order.html into a Squarespace Code
+  block. If you use the scraper output, also make publications.generated.js
+  reachable at the same relative path, OR paste its contents into the HTML just
+  before the closing </script>... ask your developer if unsure.
+
+
+============================================================================
+TUNING THE SCRAPER
+============================================================================
+Open scrape-portfolio.mjs in any text editor. Near the top you'll find three
+clearly-commented sections you can edit — no coding needed beyond adding words:
+
+  1. INDEX_PAGES          - the listing pages it crawls for article links.
+  2. ARTICLE_URL_PATTERNS - what a valid article URL looks like.
+  3. COUNTRY_TERMS /      - the keyword dictionaries. Add capitals, leaders,
+     ACTOR_TERMS            demonyms, etc. to improve detection.
+
+IMPORTANT: the country names on the left of COUNTRY_TERMS must match the map's
+names exactly. Note especially:
+  - "United States of America"  (not "USA" or "United States")
+  - "Dominican Rep."
+Everything else (Colombia, Venezuela, Mexico, Brazil, Ukraine, China, ...) is
+spelled normally.
+
+Command-line options:
+  node scrape-portfolio.mjs --dry            print, don't write
+  node scrape-portfolio.mjs --limit 40       cap articles fetched (default 60)
+  node scrape-portfolio.mjs --out data.js    custom output filename
+
+
+============================================================================
+TROUBLESHOOTING
+============================================================================
+- "publications.generated.js 404 / not found": harmless. The map runs on
+  built-in sample data until you run the scraper (STEP 4).
+- Scraper finds 0 articles: Squarespace markup may have changed. Check
+  INDEX_PAGES are correct and look at ARTICLE_URL_PATTERNS.
+- A country won't highlight: its name in COUNTRY_TERMS probably doesn't match
+  the map's spelling. Fix the key on the left.
+- No internet where you run it: the scraper needs internet to read the site;
+  the map itself needs internet only for map data + fonts (CDN links in the
+  HTML head).
+============================================================================
