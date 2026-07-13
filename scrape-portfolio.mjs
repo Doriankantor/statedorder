@@ -53,7 +53,7 @@ const COUNTRY_TERMS = {
   'Colombia':                 ['colombia', 'colombian', 'bogot', 'de la espriella', 'petro', 'cepeda', 'eln', 'farc'],
   'Venezuela':                ['venezuela', 'venezuelan', 'caracas', 'maduro', 'chavist', 'pdvsa'],
   'Mexico':                   ['mexico', 'mexican', 'sheinbaum', 'cartel', 'sinaloa'],
-  'Brazil':                   ['brazil', 'brazilian', 'lula', 'brasilia', 'bolsonaro'],
+  'Brazil':                   ['brazil', 'brazilian', 'lula', 'brasilia', 'bolsonaro', 'comando vermelho'],
   'Argentina':                ['argentina', 'argentine', 'milei', 'buenos aires'],
   'Chile':                    ['chile', 'chilean', 'santiago', 'boric'],
   'Peru':                     ['peru', 'peruvian', 'lima'],
@@ -62,14 +62,15 @@ const COUNTRY_TERMS = {
   'Cuba':                     ['cuba', 'cuban', 'havana'],
   'Nicaragua':                ['nicaragua', 'nicaraguan', 'ortega', 'managua'],
   'Panama':                   ['panama', 'panamanian', 'panama canal'],
-  'United States of America': ['united states', 'u.s.', 'us ', 'american', 'washington', 'trump', 'white house', 'pentagon'],
+  'United States of America': ['united states', 'u.s.', 'washington', 'american', 'white house', 'pentagon', 'supreme court', 'trump'],
   'Canada':                   ['canada', 'canadian', 'ottawa'],
   'Ukraine':                  ['ukraine', 'ukrainian', 'kyiv', 'zelensky'],
   'Germany':                  ['germany', 'german', 'berlin'],
   'France':                   ['france', 'french', 'paris'],
-  'Spain':                    ['spain', 'spanish', 'madrid'],
-  'Hungary':                  ['hungary', 'hungarian', 'orban', 'budapest'],
-  'Iran':                     ['iran', 'iranian', 'tehran', 'hormuz'],
+  // NOTE: 'spanish' removed — it false-matches "in Spanish on ..." boilerplate.
+  'Spain':                    ['spain', 'madrid', 'moncloa'],
+  'Hungary':                  ['hungary', 'hungarian', 'orban', 'orbán', 'budapest', 'tisza'],
+  'Iran':                     ['iran', 'iranian', 'tehran', 'hormuz', 'persian gulf'],
   'China':                    ['china', 'chinese', 'beijing', 'xi jinping'],
   'Russia':                   ['russia', 'russian', 'moscow', 'putin', 'kremlin'],
 };
@@ -128,9 +129,10 @@ function meta(html, prop) {
 }
 
 function decodeEntities(s) {
-  return s.replace(/&amp;/g, '&').replace(/&#39;/g, '\u2019').replace(/&rsquo;/g, '\u2019')
-          .replace(/&lsquo;/g, '\u2018').replace(/&quot;/g, '"').replace(/&mdash;/g, '\u2014')
-          .replace(/&nbsp;/g, ' ').replace(/&#8217;/g, '\u2019').replace(/&#8212;/g, '\u2014').trim();
+  return s.replace(/&amp;/g, '&').replace(/&#39;/g, '’').replace(/&rsquo;/g, '’')
+          .replace(/&lsquo;/g, '‘').replace(/&quot;/g, '"').replace(/&mdash;/g, '—')
+          .replace(/&ndash;/g, '–').replace(/&nbsp;/g, ' ').replace(/&#8217;/g, '’')
+          .replace(/&#8212;/g, '—').replace(/&#8211;/g, '–').trim();
 }
 
 function stripTags(html) {
@@ -140,12 +142,34 @@ function stripTags(html) {
              .replace(/\s+/g, ' ');
 }
 
+// Site-level titles that must never be used as an article title.
+const GENERIC_TITLE = /^(kantor consulting|dorian b\.?\s*kantor.*|briefing room|home)$/i;
+
+// The real article title lives in the page's <h1>, not og:title (Squarespace
+// serves the same generic og:title on every post). Take the best <h1>.
+function extractTitle(html) {
+  const h1s = [...html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)]
+    .map((m) => decodeEntities(stripTags(m[1])))
+    .filter((t) => t && t.length > 6 && !GENERIC_TITLE.test(t));
+  if (h1s.length) return h1s.sort((a, b) => b.length - a.length)[0];
+  const og = meta(html, 'og:title');
+  if (og && !GENERIC_TITLE.test(og)) return og;
+  const t = (html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? '').trim();
+  return GENERIC_TITLE.test(t) ? '' : decodeEntities(t);
+}
+
 function findDate(html) {
-  const iso = meta(html, 'article:published_time');
+  // 1) machine-readable dates first
+  const iso = meta(html, 'article:published_time')
+    || (html.match(/datetime=["']([0-9]{4}-[0-9]{2}-[0-9]{2})/)?.[1]);
   if (iso) { const d = new Date(iso); if (!isNaN(d)) return fmtDate(d); }
+  // 2) "January 8, 2026" or "Jan 8, 2026"
   const text = stripTags(html);
-  const m = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b/);
+  let m = text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b/);
   if (m) { const d = new Date(m[0]); if (!isNaN(d)) return fmtDate(d); }
+  // 3) "7/8/26" or "7/8/2026"
+  m = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
+  if (m) { let yr = +m[3]; if (yr < 100) yr += 2000; const d = new Date(yr, +m[1] - 1, +m[2]); if (!isNaN(d)) return fmtDate(d); }
   return '';
 }
 
@@ -175,29 +199,25 @@ async function main() {
   console.error(`\nFound ${links.size} article links; fetching ${list.length}.\n`);
 
   const byCountry = {};   // country -> [ {title,url,date,mentions} ]
-  const seen = new Set();
+  const seen = new Set(); // dedupe by URL (titles are unreliable on Squarespace)
 
   for (const url of list) {
+    if (seen.has(url)) continue;
+    seen.add(url);
     const html = await getHtml(url);
     if (!html) continue;
-    const title = meta(html, 'og:title') || (html.match(/<title>([^<]+)<\/title>/i)?.[1] ?? '').trim();
-    if (!title) continue;
-    const dedupeKey = title.toLowerCase();
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
+    const title = extractTitle(html);
+    if (!title) { console.error(`  ? no title  ${url}`); continue; }
 
     const date = findDate(html);
     const hay = (title + ' ' + stripTags(html)).toLowerCase();
     const countries = detect(COUNTRY_TERMS, hay);
     const mentions = detect(ACTOR_TERMS, hay);
 
-    // Attach the article to every country it clearly discusses.
-    const homeCountries = countries.filter((c) => c !== 'United States of America') .length
-      ? countries : countries; // keep US too if it's the only one
-    for (const c of homeCountries) {
-      (byCountry[c] ||= []).push({ title: decodeEntities(title), url, date, mentions });
+    for (const c of countries) {
+      (byCountry[c] ||= []).push({ title, url, date, mentions });
     }
-    console.error(`  \u2713 ${title}  [${countries.join(', ') || 'no country'}]  actors:{${mentions.join(',')}}`);
+    console.error(`  ✓ ${title}  [${countries.join(', ') || 'no country'}]  actors:{${mentions.join(',')}}`);
   }
 
   // Sort each country's publications newest-first (best-effort by parsed date).
